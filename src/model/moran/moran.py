@@ -19,4 +19,4 @@ class MORAN(nn.Module):
         else:
             x_rectified = self.MORN(x, test, debug=debug)
             preds = self.ASRN(x_rectified, length, text, text_rev, test)
-            return preds
+            return preds, None

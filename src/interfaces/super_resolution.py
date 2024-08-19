@@ -197,7 +197,7 @@ class TextSR(base.TextBase):
         current_acc_dict = {data_name: 0}
         time_begin = time.time()
         sr_time = 0
-        for i, data in (enumerate(test_loader)):
+        for data in tqdm(test_loader, total=len(test_loader)):
             images_hr, images_lr, label_strs = data
             val_batch_size = images_lr.shape[0]
             images_lr = images_lr.to(self.device)
@@ -214,7 +214,7 @@ class TextSR(base.TextBase):
             if self.args.rec == 'moran':
                 moran_input = self.parse_moran_data(images_sr[:, :3, :, :])
                 moran_output = moran(moran_input[0], moran_input[1], moran_input[2], moran_input[3], test=True,
-                                     debug=True)
+                                     debug=False)
                 preds, preds_reverse = moran_output[0]
                 _, preds = preds.max(1)
                 sim_preds = self.converter_moran.decode(preds.data, moran_input[1].data)
@@ -241,9 +241,9 @@ class TextSR(base.TextBase):
                     n_correct += 1
             sum_images += val_batch_size
             torch.cuda.empty_cache()
-            print('Evaluation: [{}][{}/{}]\t'
-                  .format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                          i + 1, len(test_loader), ))
+            # print('Evaluation: [{}][{}/{}]\t'
+            #       .format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            #               i + 1, len(test_loader), ))
             # self.test_display(images_lr, images_sr, images_hr, pred_str_lr, pred_str_sr, label_strs, str_filt)
         time_end = time.time()
         psnr_avg = sum(metric_dict['psnr']) / len(metric_dict['psnr'])
