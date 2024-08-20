@@ -21,7 +21,7 @@ def main(config, args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--arch', default='tsrn', choices=['tsrn', 'bicubic', 'srcnn', 'vdsr', 'srres', 'esrgan', 'rdn',
-                                                           'edsr', 'lapsrn'])
+                                                           'edsr', 'lapsrn', 'luma-text'])
     parser.add_argument('--test', action='store_true', default=False)
     parser.add_argument('--test_data_dir', type=str, default='../dataset/lmdb/str/TextZoom/test/medium/', help='')
     parser.add_argument('--batch_size', type=int, default=None, help='')
@@ -37,8 +37,13 @@ if __name__ == '__main__':
     parser.add_argument('--srb', type=int, default=5, help='')
     parser.add_argument('--demo', action='store_true', default=False)
     parser.add_argument('--demo_dir', type=str, default='./demo')
+    parser.add_argument('--luma_model_path', type=str, default='')
+    parser.add_argument('--guidance_scale_img', type=float, default=1.0)
     args = parser.parse_args()
     config_path = os.path.join('config', 'super_resolution.yaml')
     config = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)
     config = EasyDict(config)
+    print(f'Recognizer: {args.rec}')
+    print(f'Test data: {args.test_data_dir}')
+    print(f'Guidance scale img: {args.guidance_scale_img}')
     main(config, args)

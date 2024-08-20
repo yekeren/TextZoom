@@ -187,7 +187,7 @@ class TextSR(base.TextBase):
             crnn = self.CRNN_init()
             crnn.eval()
         # print(sum(p.numel() for p in moran.parameters()))
-        if self.args.arch != 'bicubic':
+        if self.args.arch not in ['bicubic', 'luma-text']:
             for p in model.parameters():
                 p.requires_grad = False
             model.eval()

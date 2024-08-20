@@ -15,7 +15,7 @@ from torchvision import transforms
 from torch.autograd import Variable
 from collections import OrderedDict
 
-from model import bicubic, srcnn, vdsr, srresnet, edsr, esrgan, rdn, lapsrn, tsrn
+from model import bicubic, srcnn, vdsr, srresnet, edsr, esrgan, rdn, lapsrn, tsrn, luma_text
 from model import recognizer
 from model import moran
 from model import crnn
@@ -144,9 +144,16 @@ class TextBase(object):
         elif self.args.arch == 'lapsrn':
             model = lapsrn.LapSRN(scale_factor=self.scale_factor, width=cfg.width, height=cfg.height, STN=self.args.STN)
             image_crit = lapsrn.L1_Charbonnier_loss()
+        elif self.args.arch == 'luma-text':
+            if not self.args.luma_model_path:
+                raise ValueError('luma_model_path must be set when arch luma-text is specified!')
+            model = luma_text.LumaText(self.args.luma_model_path,
+                                       scale_factor=self.scale_factor,
+                                       guidance_scale_img=self.args.guidance_scale_img)
+            image_crit = nn.MSELoss()
         else:
-            raise ValueError
-        if self.args.arch != 'bicubic':
+            raise ValueError(f'Unsupported architecture {self.args.arch}')
+        if self.args.arch not in ['bicubic', 'luma-text']:
             model = model.to(self.device)
             image_crit.to(self.device)
             if cfg.ngpu >= 1:
