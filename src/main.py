@@ -37,8 +37,17 @@ if __name__ == '__main__':
     parser.add_argument('--srb', type=int, default=5, help='')
     parser.add_argument('--demo', action='store_true', default=False)
     parser.add_argument('--demo_dir', type=str, default='./demo')
-    parser.add_argument('--luma_model_path', type=str, default='')
+
+    # Below are the new arguments.
+    parser.add_argument('--luma_model_path', type=str, default='', help='Path to the directory storing LUMA TF models')
     parser.add_argument('--guidance_scale_img', type=float, default=1.0)
+
+    # Setting guidance_scale_txt > 0 enables text conditioning. The text source can be one from ['default', 'reference', 'crnn']:
+    #     'default', means to use an empty string;
+    #     'reference', means to use the ground truth text annotation;,
+    #     'crnn', means to use the text extracted from the LQ image using the crnn ocr line recognizer.
+    parser.add_argument('--guidance_scale_txt', type=float, default=0.0)
+    parser.add_argument('--text_source', default='default', choices=['default', 'reference', 'aster', 'moran', 'crnn'])
     args = parser.parse_args()
     config_path = os.path.join('config', 'super_resolution.yaml')
     config = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)

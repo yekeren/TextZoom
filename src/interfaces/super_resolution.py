@@ -177,15 +177,16 @@ class TextSR(base.TextBase):
         test_data, test_loader = self.get_test_data(self.test_data_dir)
         data_name = self.args.test_data_dir.split('/')[-1]
         print('evaling %s' % data_name)
-        if self.args.rec == 'moran':
+        if 'moran' in [self.args.rec, self.args.text_source]:
             moran = self.MORAN_init()
             moran.eval()
-        elif self.args.rec == 'aster':
+        if 'aster' in [self.args.rec, self.args.text_source]:
             aster, aster_info = self.Aster_init()
             aster.eval()
-        elif self.args.rec == 'crnn':
+        if 'crnn' in [self.args.rec, self.args.text_source]:
             crnn = self.CRNN_init()
             crnn.eval()
+
         # print(sum(p.numel() for p in moran.parameters()))
         if self.args.arch not in ['bicubic', 'luma-text']:
             for p in model.parameters():
@@ -203,7 +204,40 @@ class TextSR(base.TextBase):
             images_lr = images_lr.to(self.device)
             images_hr = images_hr.to(self.device)
             sr_beigin = time.time()
-            images_sr = model(images_lr)
+
+            if self.args.arch != 'luma-text':
+                images_sr = model(images_lr)
+            else:
+                batch_size = images_lr.shape[0]
+                if self.args.text_source == 'default':
+                    texts = [''] * batch_size
+                elif self.args.text_source == 'reference':
+                    texts = label_strs
+                elif self.args.text_source == 'crnn':
+                    crnn_input = self.parse_crnn_data(images_lr[:, :3, :, :])
+                    crnn_output = crnn(crnn_input)
+                    _, preds = crnn_output.max(2)
+                    preds = preds.transpose(1, 0).contiguous().view(-1)
+                    preds_size = torch.IntTensor([crnn_output.size(0)] * val_batch_size)
+                    texts = self.converter_crnn.decode(preds.data, preds_size.data, raw=False)
+                elif self.args.text_source == 'moran':
+                    moran_input = self.parse_moran_data(images_lr[:, :3, :, :])
+                    moran_output = moran(moran_input[0], moran_input[1], moran_input[2], moran_input[3], test=True,
+                                         debug=False)
+                    preds, preds_reverse = moran_output[0]
+                    _, preds = preds.max(1)
+                    sim_preds = self.converter_moran.decode(preds.data, moran_input[1].data)
+                    texts = [pred.split('$')[0] for pred in sim_preds]
+                elif self.args.text_source == 'aster':
+                    aster_dict_sr = self.parse_aster_data(images_lr[:, :3, :, :])
+                    aster_output_sr = aster(aster_dict_sr)
+                    pred_rec_sr = aster_output_sr['output']['pred_rec']
+                    texts, _ = get_str_list(pred_rec_sr, aster_dict_sr['rec_targets'], dataset=aster_info)
+                else:
+                    raise NotImplementedError(f'{self.args.text_source} is not implemented')
+
+                images_sr = model(images_lr, texts)
+
 
             # images_sr = images_lr
             sr_end = time.time()

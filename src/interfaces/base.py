@@ -147,9 +147,11 @@ class TextBase(object):
         elif self.args.arch == 'luma-text':
             if not self.args.luma_model_path:
                 raise ValueError('luma_model_path must be set when arch luma-text is specified!')
-            model = luma_text.LumaText(self.args.luma_model_path,
+            luma_model_path = os.path.join('../luma_models', self.args.luma_model_path)
+            model = luma_text.LumaText(luma_model_path,
                                        scale_factor=self.scale_factor,
-                                       guidance_scale_img=self.args.guidance_scale_img)
+                                       guidance_scale_img=self.args.guidance_scale_img,
+                                       guidance_scale_txt=self.args.guidance_scale_txt)
             image_crit = nn.MSELoss()
         else:
             raise ValueError(f'Unsupported architecture {self.args.arch}')

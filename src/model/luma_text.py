@@ -2,9 +2,27 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import tensorflow as tf
+import numpy as np
 
+# Input/output tensor names.
 _INPUT_IMAGE_COND_NAME = 'image_cond:0'
+_INPUT_TOKEN_NAME = 'tokens:0'
 _OUTPUT_IMAGE_NAME = 'image'
+
+
+# ByT5 special tokens.
+_BYT5_NUM_SPECIAL_TOKENS = 3
+_BYT5_EOS_ID = 1
+_BYT5_PAD_ID = 0
+
+
+def _byt5_tokenize(s: str, max_seq_len: int) -> list[int]:
+  """Tokenizes a string using the implementation of the BYT5 tokenizer."""
+  encoded = [x + _BYT5_NUM_SPECIAL_TOKENS for x in list(s.encode("utf-8"))]
+  encoded += [_BYT5_EOS_ID]
+  if len(encoded) < max_seq_len:
+    encoded += [_BYT5_PAD_ID] * (max_seq_len - len(encoded))
+  return encoded[:max_seq_len]
 
 
 def _resize_to_height(
@@ -85,55 +103,59 @@ def _resize_and_left_pad(
 
 
 class LumaText(object):
-    def __init__(self, model_path: str, scale_factor=2, guidance_scale_img: float = 1.0):
+    def __init__(self, model_path: str, scale_factor=2, guidance_scale_img: float = 1.0, guidance_scale_txt: float = 0.0):
         super().__init__()
 
         self._scale_factor = scale_factor
-        self._guidance_scale = 0.0
         self._guidance_scale_img = guidance_scale_img
+        self._guidance_scale_txt = guidance_scale_txt
 
         self._imported = tf.saved_model.load(model_path)
         self._model_input_height = self._model_input_width = None
+        self._model_max_seq_len = None
         input_tensors = self._imported.signatures['serving_default'].inputs
         for input_tensor in input_tensors:
             if input_tensor.name == _INPUT_IMAGE_COND_NAME:
                 self._model_input_height = input_tensor.shape[1]
                 self._model_input_width = input_tensor.shape[2]
-                break
+            elif input_tensor.name == _INPUT_TOKEN_NAME:
+                self._model_max_seq_len = input_tensor.shape[1]
+
         if None in [self._model_input_height, self._model_input_width]:
             raise ValueError('Failed to find the input tensor in the TF graph.')
-        print(f'Luma-text is initialized from {model_path}, expected input size={self._model_input_height}x{self._model_input_width}')
+        print(f'Luma-text is initialized from {model_path}, expected input size={self._model_input_height}x{self._model_input_width}, max_seq_len={self._model_max_seq_len}')
+        print(f'Setting guidance_scale_img to {guidance_scale_img}; Setting guidance_scale_txt to {guidance_scale_txt}.')
 
-    def __call__(self, x):
+    def __call__(self, x, texts: list[str]):
         _, _, height, width = x.shape
+        tokens = tf.convert_to_tensor([_byt5_tokenize(text, self._model_max_seq_len) for text in texts], dtype=tf.int32)
         model_fn = self._imported.signatures['serving_default']
 
-        def _process_single(image):
+        def _process_single(image_and_tokens):
+            image, tokens = image_and_tokens
             model_input, valid_height, valid_width = _resize_and_left_pad(image,
                                                                           self._model_input_height,
                                                                           self._model_input_width)
             # Run TF engine, note that the TF engine requires a batch=1 first dimension.
-            model_output = model_fn(guidance_scale=[self._guidance_scale],
+            model_output = model_fn(guidance_scale=[self._guidance_scale_txt],
                                     guidance_scale_img=[self._guidance_scale_img],
                                     image_cond=model_input[tf.newaxis, ...],
-                                    tokens=[[0] * 128],
+                                    tokens=tokens[tf.newaxis, ...],
                                     valid_height=[valid_height],
                                     valid_width=[valid_width])[_OUTPUT_IMAGE_NAME]
             model_output = model_output[:, :, :valid_width, :]
             return model_output[0]
 
 
-        def _process_batch(images):
-            outputs = tf.map_fn(_process_single, images)
-            return outputs
-
+        def _process_batch(images, tokens):
+            return tf.map_fn(_process_single, (images, tokens), fn_output_signature=tf.uint8)
 
         # Adapt the input tensor.
         model_input = x.permute((0, 2, 3, 1))  # Torch2Tf ((b, c, h, w) -> (b, h, w, c)).
         model_input = model_input.cpu().numpy()  # CUDA to CPU.
         model_input = tf.cast(tf.clip_by_value(model_input, 0, 1) * 255, tf.uint8)  # Float to uint8.
 
-        model_output = _process_batch(model_input)
+        model_output = _process_batch(model_input, tokens)
 
         # Adapt the output tensor.
         model_output = tf.cast(model_output, tf.float32) / 255.0  # Uint8 to float.
