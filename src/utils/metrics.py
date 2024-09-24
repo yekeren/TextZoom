@@ -17,7 +17,7 @@ def _normalize_text(text):
     return text.lower()
 
 
-def get_str_list(output, target, dataset=None):
+def get_str_list(output, target, dataset=None, lowercase: bool = True):
     # label_seq
     assert output.dim() == 2 and target.dim() == 2
 
@@ -55,8 +55,7 @@ def get_str_list(output, target, dataset=None):
         targ_list.append(targ_list_i)
 
     # char list to string
-    # if dataset.lowercase:
-    if True:
+    if lowercase:
         # pred_list = [''.join(pred).lower() for pred in pred_list]
         # targ_list = [''.join(targ).lower() for targ in targ_list]
         pred_list = [_normalize_text(pred) for pred in pred_list]

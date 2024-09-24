@@ -48,7 +48,7 @@ if __name__ == '__main__':
     #     'reference', means to use the ground truth text annotation;,
     #     'crnn', means to use the text extracted from the LQ image using the crnn ocr line recognizer.
     parser.add_argument('--guidance_scale_txt', type=float, default=0.0)
-    parser.add_argument('--text_source', default='default', choices=['default', 'reference', 'aster', 'moran', 'crnn'])
+    parser.add_argument('--text_source', default='default', choices=['default', 'reference', 'aster', 'aster_fixed', 'moran', 'crnn'])
     args = parser.parse_args()
     config_path = os.path.join('config', 'super_resolution.yaml')
     config = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)

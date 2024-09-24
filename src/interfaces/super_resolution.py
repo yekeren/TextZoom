@@ -314,7 +314,7 @@ class TextSR(base.TextBase):
         if 'moran' in [self.args.rec, self.args.text_source]:
             moran = self.MORAN_init()
             moran.eval()
-        if 'aster' in [self.args.rec, self.args.text_source]:
+        if 'aster' in [self.args.rec, self.args.text_source] or self.args.text_source == 'aster_fixed':
             aster, aster_info = self.Aster_init()
             aster.eval()
         if 'crnn' in [self.args.rec, self.args.text_source]:
@@ -338,7 +338,7 @@ class TextSR(base.TextBase):
         time_begin = time.time()
         sr_time = 0
         for im_name in tqdm(os.listdir(self.args.demo_dir)):
-            if not im_name.endswith('.png') and not im_name.endswith('.jpg') and not im_name.endswith('.jpeg):
+            if not im_name.endswith('.png') and not im_name.endswith('.jpg') and not im_name.endswith('.jpeg'):
                 continue
             images_lr = transform_(os.path.join(self.args.demo_dir, im_name))
             images_lr = images_lr.to(self.device)
@@ -377,6 +377,11 @@ class TextSR(base.TextBase):
                     aster_output_sr = aster(aster_dict_sr)
                     pred_rec_sr = aster_output_sr['output']['pred_rec']
                     texts, _ = get_str_list(pred_rec_sr, aster_dict_sr['rec_targets'], dataset=aster_info)
+                elif self.args.text_source == 'aster_fixed':
+                    aster_dict_sr = self.parse_aster_data(images_lr[:, :3, :, :])
+                    aster_output_sr = aster(aster_dict_sr)
+                    pred_rec_sr = aster_output_sr['output']['pred_rec']
+                    texts, _ = get_str_list(pred_rec_sr, aster_dict_sr['rec_targets'], dataset=aster_info, lowercase=False)
                 else:
                     raise NotImplementedError(f'{self.args.text_source} is not implemented')
 
@@ -389,7 +394,6 @@ class TextSR(base.TextBase):
                     'text_source': self.args.text_source,
                     'text': texts[0]
                 })
-                print('Recognized text is: ', texts)
                 images_sr = model(images_lr, texts)
 
                 torchvision.utils.save_image(images_sr[0], os.path.join(sr_subdir, im_name))
