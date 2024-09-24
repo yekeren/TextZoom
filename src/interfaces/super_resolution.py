@@ -1,6 +1,7 @@
 import torch
 import sys
 import time
+import json
 import os
 from time import gmtime, strftime
 from datetime import datetime
@@ -9,6 +10,7 @@ import math
 import copy
 from utils import util, ssim_psnr
 from IPython import embed
+import torchvision
 from torchvision import transforms
 from torch.autograd import Variable
 import torch.nn as nn
@@ -296,7 +298,7 @@ class TextSR(base.TextBase):
 
         def transform_(path):
             img = Image.open(path)
-            img = img.resize((256, 32), Image.BICUBIC)
+            img = img.resize((128, 32), Image.BICUBIC)
             img_tensor = transforms.ToTensor()(img)
             if mask_:
                 mask = img.convert('L')
@@ -309,28 +311,91 @@ class TextSR(base.TextBase):
 
         model_dict = self.generator_init()
         model, image_crit = model_dict['model'], model_dict['crit']
-        if self.args.rec == 'moran':
+        if 'moran' in [self.args.rec, self.args.text_source]:
             moran = self.MORAN_init()
             moran.eval()
-        elif self.args.rec == 'aster':
+        if 'aster' in [self.args.rec, self.args.text_source]:
             aster, aster_info = self.Aster_init()
             aster.eval()
-        elif self.args.rec == 'crnn':
+        if 'crnn' in [self.args.rec, self.args.text_source]:
             crnn = self.CRNN_init()
             crnn.eval()
-        if self.args.arch != 'bicubic':
+        if self.args.arch not in ['bicubic', 'luma-text']:
             for p in model.parameters():
                 p.requires_grad = False
             model.eval()
+
+        # Create output directories.
+        if self.args.arch == 'luma-text':
+            lr_subdir = os.path.join(self.args.demo_output_dir, 'lr')
+            sr_subdir = os.path.join(self.args.demo_output_dir, self.args.text_source)
+            os.makedirs(lr_subdir, exist_ok=True)
+            os.makedirs(sr_subdir, exist_ok=True)
+
+
         n_correct = 0
         sum_images = 0
         time_begin = time.time()
         sr_time = 0
         for im_name in tqdm(os.listdir(self.args.demo_dir)):
+            if not im_name.endswith('.png') and not im_name.endswith('.jpg') and not im_name.endswith('.jpeg):
+                continue
             images_lr = transform_(os.path.join(self.args.demo_dir, im_name))
             images_lr = images_lr.to(self.device)
+            val_batch_size = batch_size = images_lr.shape[0]
             sr_beigin = time.time()
-            images_sr = model(images_lr)
+
+            result_dict = {
+                'arch': self.args.arch,
+            }
+            if self.args.arch != 'luma-text':
+                images_sr = model(images_lr)
+            else:
+                if self.args.text_source == 'default':
+                    texts = [''] * batch_size
+                elif self.args.text_source == 'reference':
+                    annotation_file = os.path.join(self.args.demo_dir, im_name.split('.')[0])
+                    with open(annotation_file, 'r') as f:
+                        texts = f.read().strip('\n')
+                elif self.args.text_source == 'crnn':
+                    crnn_input = self.parse_crnn_data(images_lr[:, :3, :, :])
+                    crnn_output = crnn(crnn_input)
+                    _, preds = crnn_output.max(2)
+                    preds = preds.transpose(1, 0).contiguous().view(-1)
+                    preds_size = torch.IntTensor([crnn_output.size(0)] * val_batch_size)
+                    texts = self.converter_crnn_condition.decode(preds.data, preds_size.data, raw=False)
+                elif self.args.text_source == 'moran':
+                    moran_input = self.parse_moran_data(images_lr[:, :3, :, :])
+                    moran_output = moran(moran_input[0], moran_input[1], moran_input[2], moran_input[3], test=True,
+                                         debug=False)
+                    preds, preds_reverse = moran_output[0]
+                    _, preds = preds.max(1)
+                    sim_preds = self.converter_moran.decode(preds.data, moran_input[1].data)
+                    texts = pred.split('$')[0]
+                elif self.args.text_source == 'aster':
+                    aster_dict_sr = self.parse_aster_data(images_lr[:, :3, :, :])
+                    aster_output_sr = aster(aster_dict_sr)
+                    pred_rec_sr = aster_output_sr['output']['pred_rec']
+                    texts, _ = get_str_list(pred_rec_sr, aster_dict_sr['rec_targets'], dataset=aster_info)
+                else:
+                    raise NotImplementedError(f'{self.args.text_source} is not implemented')
+
+                if isinstance(texts, str):
+                    texts = [texts]
+                result_dict.update({
+                    'arch': self.args.arch,
+                    'cfg_img': self.args.guidance_scale_img,
+                    'cfg_txt': self.args.guidance_scale_txt,
+                    'text_source': self.args.text_source,
+                    'text': texts[0]
+                })
+                print('Recognized text is: ', texts)
+                images_sr = model(images_lr, texts)
+
+                torchvision.utils.save_image(images_sr[0], os.path.join(sr_subdir, im_name))
+                torchvision.utils.save_image(images_lr[0], os.path.join(lr_subdir, im_name))
+                with open(os.path.join(sr_subdir, im_name.split('.')[0] + '.json'), 'w') as f:
+                    f.write(json.dumps(result_dict, indent=2))
 
             sr_end = time.time()
             sr_time += sr_end - sr_beigin

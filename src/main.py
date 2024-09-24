@@ -39,6 +39,7 @@ if __name__ == '__main__':
     parser.add_argument('--demo_dir', type=str, default='./demo')
 
     # Below are the new arguments.
+    parser.add_argument('--demo_output_dir', type=str, default='./results')
     parser.add_argument('--luma_model_path', type=str, default='', help='Path to the directory storing LUMA TF models')
     parser.add_argument('--guidance_scale_img', type=float, default=1.0)
 
