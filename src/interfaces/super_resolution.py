@@ -6,6 +6,7 @@ import os
 from time import gmtime, strftime
 from datetime import datetime
 from tqdm import tqdm
+import editdistance
 import math
 import copy
 from utils import util, ssim_psnr
@@ -25,6 +26,8 @@ from utils.meters import AverageMeter
 from utils.metrics import get_str_list, Accuracy
 from utils.util import str_filt
 from utils import utils_moran
+
+_EPSILON = 1e-6
 
 
 class TextSR(base.TextBase):
@@ -173,16 +176,63 @@ class TextSR(base.TextBase):
         metric_dict['ssim_avg'] = ssim_avg
         return metric_dict
 
+    def _recognize(self, images, texts, ocr_models):
+        aster, aster_info, moran, crnn = ocr_models
+        if self.args.text_source == 'crnn':
+            crnn_input = self.parse_crnn_data(images[:, :3, :, :])
+            crnn_output = crnn(crnn_input)
+            _, preds = crnn_output.max(2)
+            preds = preds.transpose(1, 0).contiguous().view(-1)
+            preds_size = torch.IntTensor([crnn_output.size(0)] * val_batch_size)
+            texts = self.converter_crnn.decode(preds.data, preds_size.data, raw=False)
+        elif self.args.text_source == 'moran':
+            moran_input = self.parse_moran_data(images[:, :3, :, :])
+            moran_output = moran(moran_input[0], moran_input[1], moran_input[2], moran_input[3], test=True,
+                                 debug=False)
+            preds, preds_reverse = moran_output[0]
+            _, preds = preds.max(1)
+            sim_preds = self.converter_moran.decode(preds.data, moran_input[1].data)
+            texts = [pred.split('$')[0] for pred in sim_preds]
+        elif self.args.text_source == 'aster':
+            aster_dict_sr = self.parse_aster_data(images[:, :3, :, :])
+            aster_output_sr = aster(aster_dict_sr)
+            pred_rec_sr = aster_output_sr['output']['pred_rec']
+            texts, _ = get_str_list(pred_rec_sr, aster_dict_sr['rec_targets'], dataset=aster_info)
+        elif self.args.text_source == 'aster_fixed':
+            aster_dict_sr = self.parse_aster_data(images[:, :3, :, :])
+            aster_output_sr = aster(aster_dict_sr)
+            pred_rec_sr = aster_output_sr['output']['pred_rec']
+            texts, _ = get_str_list(pred_rec_sr, aster_dict_sr['rec_targets'], dataset=aster_info, lowercase=False)
+        else:
+            raise NotImplementedError(f'{self.args.text_source} is not implemented')
+        return texts
+
+
+    def _iterative_recognize(self, text_sr_model, ocr_models, images, iterations: int = 0):
+        batch_size = images.shape[0]
+        texts = [''] * batch_size
+
+        if iterations == 0:
+            return self._recognize(images, texts, ocr_models)
+        elif iterations > 0:
+            for _ in range(iterations):
+                images = text_sr_model(images, texts)
+                texts = self._recognize(images, texts, ocr_models)
+            return texts
+        raise ValueError('iterations must be greater than or equal to zero')
+
     def test(self):
         model_dict = self.generator_init()
         model, image_crit = model_dict['model'], model_dict['crit']
         test_data, test_loader = self.get_test_data(self.test_data_dir)
         data_name = self.args.test_data_dir.split('/')[-1]
         print('evaling %s' % data_name)
+
+        aster, aster_info, moran, crnn = None, None, None, None
         if 'moran' in [self.args.rec, self.args.text_source]:
             moran = self.MORAN_init()
             moran.eval()
-        if 'aster' in [self.args.rec, self.args.text_source]:
+        if 'aster' in [self.args.rec, self.args.text_source] or 'aster_fixed' == self.args.text_source:
             aster, aster_info = self.Aster_init()
             aster.eval()
         if 'crnn' in [self.args.rec, self.args.text_source]:
@@ -195,9 +245,11 @@ class TextSR(base.TextBase):
                 p.requires_grad = False
             model.eval()
         n_correct = 0
+        sum_ned = 0
         sum_images = 0
         metric_dict = {'psnr': [], 'ssim': [], 'accuracy': 0.0, 'psnr_avg': 0.0, 'ssim_avg': 0.0}
         current_acc_dict = {data_name: 0}
+        current_ned_dict = {data_name: 0}
         time_begin = time.time()
         sr_time = 0
         for data in tqdm(test_loader, total=len(test_loader)):
@@ -215,28 +267,8 @@ class TextSR(base.TextBase):
                     texts = [''] * batch_size
                 elif self.args.text_source == 'reference':
                     texts = label_strs
-                elif self.args.text_source == 'crnn':
-                    crnn_input = self.parse_crnn_data(images_lr[:, :3, :, :])
-                    crnn_output = crnn(crnn_input)
-                    _, preds = crnn_output.max(2)
-                    preds = preds.transpose(1, 0).contiguous().view(-1)
-                    preds_size = torch.IntTensor([crnn_output.size(0)] * val_batch_size)
-                    texts = self.converter_crnn.decode(preds.data, preds_size.data, raw=False)
-                elif self.args.text_source == 'moran':
-                    moran_input = self.parse_moran_data(images_lr[:, :3, :, :])
-                    moran_output = moran(moran_input[0], moran_input[1], moran_input[2], moran_input[3], test=True,
-                                         debug=False)
-                    preds, preds_reverse = moran_output[0]
-                    _, preds = preds.max(1)
-                    sim_preds = self.converter_moran.decode(preds.data, moran_input[1].data)
-                    texts = [pred.split('$')[0] for pred in sim_preds]
-                elif self.args.text_source == 'aster':
-                    aster_dict_sr = self.parse_aster_data(images_lr[:, :3, :, :])
-                    aster_output_sr = aster(aster_dict_sr)
-                    pred_rec_sr = aster_output_sr['output']['pred_rec']
-                    texts, _ = get_str_list(pred_rec_sr, aster_dict_sr['rec_targets'], dataset=aster_info)
                 else:
-                    raise NotImplementedError(f'{self.args.text_source} is not implemented')
+                    texts = self._iterative_recognize(text_sr_model=model, ocr_models=(aster, aster_info, moran, crnn), images=images_lr, iterations=self.args.num_restore_ocr_iterations)
 
                 images_sr = model(images_lr, texts)
 
@@ -273,8 +305,11 @@ class TextSR(base.TextBase):
                 preds_size = torch.IntTensor([crnn_output.size(0)] * val_batch_size)
                 pred_str_sr = self.converter_crnn.decode(preds.data, preds_size.data, raw=False)
             for pred, target in zip(pred_str_sr, label_strs):
-                if str_filt(pred, 'lower') == str_filt(target, 'lower'):
+                str_pred = str_filt(pred, 'lower')
+                str_target = str_filt(target, 'lower')
+                if str_pred == str_target:
                     n_correct += 1
+                sum_ned += editdistance.distance(str_pred, str_target) / max(len(str_pred), len(str_target), _EPSILON)
             sum_images += val_batch_size
             torch.cuda.empty_cache()
             # print('Evaluation: [{}][{}/{}]\t'
@@ -285,12 +320,14 @@ class TextSR(base.TextBase):
         psnr_avg = sum(metric_dict['psnr']) / len(metric_dict['psnr'])
         ssim_avg = sum(metric_dict['ssim']) / len(metric_dict['ssim'])
         acc = round(n_correct / sum_images, 4)
+        ned = round(sum_ned / sum_images, 4)
         fps = sum_images/(time_end - time_begin)
         psnr_avg = round(psnr_avg.item(), 6)
         ssim_avg = round(ssim_avg.item(), 6)
         current_acc_dict[data_name] = float(acc)
+        current_ned_dict[data_name] = float(ned)
         # result = {'accuracy': current_acc_dict, 'fps': fps}
-        result = {'accuracy': current_acc_dict, 'psnr_avg': psnr_avg, 'ssim_avg': ssim_avg, 'fps': fps}
+        result = {'accuracy': current_acc_dict, 'n.e.d.': current_ned_dict, 'psnr_avg': psnr_avg, 'ssim_avg': ssim_avg, 'fps': fps}
         print(result)
 
     def demo(self):
@@ -314,7 +351,7 @@ class TextSR(base.TextBase):
         if 'moran' in [self.args.rec, self.args.text_source]:
             moran = self.MORAN_init()
             moran.eval()
-        if 'aster' in [self.args.rec, self.args.text_source] or self.args.text_source == 'aster_fixed':
+        if 'aster' in [self.args.rec, self.args.text_source]:
             aster, aster_info = self.Aster_init()
             aster.eval()
         if 'crnn' in [self.args.rec, self.args.text_source]:
@@ -379,6 +416,12 @@ class TextSR(base.TextBase):
                     texts, _ = get_str_list(pred_rec_sr, aster_dict_sr['rec_targets'], dataset=aster_info)
                 elif self.args.text_source == 'aster_fixed':
                     aster_dict_sr = self.parse_aster_data(images_lr[:, :3, :, :])
+                    aster_output_sr = aster(aster_dict_sr)
+                    pred_rec_sr = aster_output_sr['output']['pred_rec']
+                    texts, _ = get_str_list(pred_rec_sr, aster_dict_sr['rec_targets'], dataset=aster_info, lowercase=False)
+                elif self.args.text_source.startswith('aster_fixed_iter'):
+                    image_only_results = model(images_lr, [''] * batch_size)
+                    aster_dict_sr = self.parse_aster_data(image_only_results[:, :3, :, :])
                     aster_output_sr = aster(aster_dict_sr)
                     pred_rec_sr = aster_output_sr['output']['pred_rec']
                     texts, _ = get_str_list(pred_rec_sr, aster_dict_sr['rec_targets'], dataset=aster_info, lowercase=False)

@@ -43,12 +43,9 @@ if __name__ == '__main__':
     parser.add_argument('--luma_model_path', type=str, default='', help='Path to the directory storing LUMA TF models')
     parser.add_argument('--guidance_scale_img', type=float, default=1.0)
 
-    # Setting guidance_scale_txt > 0 enables text conditioning. The text source can be one from ['default', 'reference', 'crnn']:
-    #     'default', means to use an empty string;
-    #     'reference', means to use the ground truth text annotation;,
-    #     'crnn', means to use the text extracted from the LQ image using the crnn ocr line recognizer.
-    parser.add_argument('--guidance_scale_txt', type=float, default=0.0)
-    parser.add_argument('--text_source', default='default', choices=['default', 'reference', 'aster', 'aster_fixed', 'moran', 'crnn'])
+    parser.add_argument('--guidance_scale_txt', type=float, default=0.0, help='Setting a value greater than 0 to enable text conditioning.')
+    parser.add_argument('--text_source', default='default', choices=['default', 'reference', 'crnn', 'moran', 'aster', 'aster_fixed'])
+    parser.add_argument('--num_restore_ocr_iterations', type=int, default=0, help='Number of restore-ocr iterations. 0 to disable it.')
     args = parser.parse_args()
     config_path = os.path.join('config', 'super_resolution.yaml')
     config = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)
