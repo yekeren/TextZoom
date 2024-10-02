@@ -162,9 +162,11 @@ class LumaText(object):
         model_output = tf.transpose(model_output, (0, 3, 1, 2))  # Tf2Torch((b, h, w, c) -> (b, c, h, w))
         model_output = torch.from_numpy(model_output.numpy()).to('cuda')  # CPU to CUDA.
        
-        target_h, target_w = height * self._scale_factor, width * self._scale_factor
-        if (model_output.shape[2], model_output.shape[3]) != (target_h, target_w):
-            output = F.interpolate(model_output, size=(target_h, target_w), mode='bicubic', align_corners=True)
-        else:
-            output = model_output
-        return output
+        return model_output
+
+        # The following code was previously used for adapting 48x480 model to 32x128 task in a zero-shot way, deprecated.
+        # target_h, target_w = height * self._scale_factor, width * self._scale_factor
+        # if (model_output.shape[2], model_output.shape[3]) != (target_h, target_w):
+        #     output = F.interpolate(model_output, size=(target_h, target_w), mode='bicubic', align_corners=True)
+        # else:
+        #     output = model_output

@@ -176,7 +176,7 @@ class TextSR(base.TextBase):
         metric_dict['ssim_avg'] = ssim_avg
         return metric_dict
 
-    def _recognize(self, images, texts, ocr_models):
+    def _recognize(self, images, ocr_models):
         aster, aster_info, moran, crnn = ocr_models
         if self.args.text_source == 'crnn':
             crnn_input = self.parse_crnn_data(images[:, :3, :, :])
@@ -208,18 +208,14 @@ class TextSR(base.TextBase):
         return texts
 
 
-    def _iterative_recognize(self, text_sr_model, ocr_models, images, iterations: int = 0):
-        batch_size = images.shape[0]
-        texts = [''] * batch_size
+    def _iterative_restore(self, text_sr_model, ocr_models, images_lr, iterations: int = 0):
+        batch_size = images_lr.shape[0]
 
-        if iterations == 0:
-            return self._recognize(images, texts, ocr_models)
-        elif iterations > 0:
-            for _ in range(iterations):
-                images = text_sr_model(images, texts)
-                texts = self._recognize(images, texts, ocr_models)
-            return texts
-        raise ValueError('iterations must be greater than or equal to zero')
+        restored = text_sr_model(images_lr, [''] * batch_size)
+        for _ in range(iterations):
+            texts = self._recognize(restored, ocr_models)
+            restored = text_sr_model(images_lr, texts)
+        return restored
 
     def test(self):
         model_dict = self.generator_init()
@@ -238,6 +234,7 @@ class TextSR(base.TextBase):
         if 'crnn' in [self.args.rec, self.args.text_source]:
             crnn = self.CRNN_init()
             crnn.eval()
+        print(f"Number of iterations={self.args.num_restore_ocr_iterations}")
 
         # print(sum(p.numel() for p in moran.parameters()))
         if self.args.arch not in ['bicubic', 'luma-text']:
@@ -246,10 +243,10 @@ class TextSR(base.TextBase):
             model.eval()
         n_correct = 0
         sum_ned = 0
+        sum_ed, sum_src_len, sum_dst_len = 0, 0, 0
         sum_images = 0
         metric_dict = {'psnr': [], 'ssim': [], 'accuracy': 0.0, 'psnr_avg': 0.0, 'ssim_avg': 0.0}
         current_acc_dict = {data_name: 0}
-        current_ned_dict = {data_name: 0}
         time_begin = time.time()
         sr_time = 0
         for data in tqdm(test_loader, total=len(test_loader)):
@@ -265,12 +262,12 @@ class TextSR(base.TextBase):
                 batch_size = images_lr.shape[0]
                 if self.args.text_source == 'default':
                     texts = [''] * batch_size
+                    images_sr = model(images_lr, texts)
                 elif self.args.text_source == 'reference':
                     texts = label_strs
+                    images_sr = model(images_lr, texts)
                 else:
-                    texts = self._iterative_recognize(text_sr_model=model, ocr_models=(aster, aster_info, moran, crnn), images=images_lr, iterations=self.args.num_restore_ocr_iterations)
-
-                images_sr = model(images_lr, texts)
+                    images_sr = self._iterative_restore(text_sr_model=model, ocr_models=(aster, aster_info, moran, crnn), images_lr=images_lr, iterations=self.args.num_restore_ocr_iterations)
 
 
             # images_sr = images_lr
@@ -310,6 +307,9 @@ class TextSR(base.TextBase):
                 if str_pred == str_target:
                     n_correct += 1
                 sum_ned += editdistance.distance(str_pred, str_target) / max(len(str_pred), len(str_target), _EPSILON)
+                sum_ed += editdistance.distance(str_pred, str_target)
+                sum_src_len += len(str_pred)
+                sum_dst_len += len(str_target)
             sum_images += val_batch_size
             torch.cuda.empty_cache()
             # print('Evaluation: [{}][{}/{}]\t'
@@ -321,13 +321,15 @@ class TextSR(base.TextBase):
         ssim_avg = sum(metric_dict['ssim']) / len(metric_dict['ssim'])
         acc = round(n_correct / sum_images, 4)
         ned = round(sum_ned / sum_images, 4)
+        macro_ned = round(sum_ed / max(sum_src_len, sum_dst_len, _EPSILON), 4)
         fps = sum_images/(time_end - time_begin)
         psnr_avg = round(psnr_avg.item(), 6)
         ssim_avg = round(ssim_avg.item(), 6)
         current_acc_dict[data_name] = float(acc)
-        current_ned_dict[data_name] = float(ned)
+        current_ned_dict = {data_name: float(ned)}
+        current_macro_ned_dict = {data_name: float(macro_ned)}
         # result = {'accuracy': current_acc_dict, 'fps': fps}
-        result = {'accuracy': current_acc_dict, 'n.e.d.': current_ned_dict, 'psnr_avg': psnr_avg, 'ssim_avg': ssim_avg, 'fps': fps}
+        result = {'accuracy': current_acc_dict, 'micro-n.e.d.': current_ned_dict, 'macro-n.e.d': current_macro_ned_dict, 'psnr_avg': psnr_avg, 'ssim_avg': ssim_avg, 'fps': fps}
         print(result)
 
     def demo(self):

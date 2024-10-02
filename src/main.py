@@ -42,10 +42,9 @@ if __name__ == '__main__':
     parser.add_argument('--demo_output_dir', type=str, default='./results')
     parser.add_argument('--luma_model_path', type=str, default='', help='Path to the directory storing LUMA TF models')
     parser.add_argument('--guidance_scale_img', type=float, default=1.0)
-
     parser.add_argument('--guidance_scale_txt', type=float, default=0.0, help='Setting a value greater than 0 to enable text conditioning.')
     parser.add_argument('--text_source', default='default', choices=['default', 'reference', 'crnn', 'moran', 'aster', 'aster_fixed'])
-    parser.add_argument('--num_restore_ocr_iterations', type=int, default=0, help='Number of restore-ocr iterations. 0 to disable it.')
+    parser.add_argument('--num_restore_ocr_iterations', type=int, default=1, help='Number of restore-ocr iterations.')
     args = parser.parse_args()
     config_path = os.path.join('config', 'super_resolution.yaml')
     config = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)
