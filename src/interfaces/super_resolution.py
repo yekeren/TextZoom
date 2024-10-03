@@ -324,15 +324,15 @@ class TextSR(base.TextBase):
         ssim_avg = sum(metric_dict['ssim']) / len(metric_dict['ssim'])
         acc = round(n_correct / sum_images, 4)
         ned = round(sum_ned / sum_images, 4)
-        macro_ned = round(sum_ed / max(sum_src_len, sum_dst_len, _EPSILON), 4)
+        micro_ned = round(sum_ed / max(sum_src_len, sum_dst_len, _EPSILON), 4)
         fps = sum_images/(time_end - time_begin)
         psnr_avg = round(psnr_avg.item(), 6)
         ssim_avg = round(ssim_avg.item(), 6)
         current_acc_dict[data_name] = float(acc)
         current_ned_dict = {data_name: float(ned)}
-        current_macro_ned_dict = {data_name: float(macro_ned)}
+        current_micro_ned_dict = {data_name: float(micro_ned)}
         # result = {'accuracy': current_acc_dict, 'fps': fps}
-        result = {'accuracy': current_acc_dict, 'micro-n.e.d.': current_ned_dict, 'macro-n.e.d': current_macro_ned_dict, 'psnr_avg': psnr_avg, 'ssim_avg': ssim_avg, 'fps': fps}
+        result = {'accuracy': current_acc_dict, 'macro-n.e.d.': current_ned_dict, 'micro-n.e.d': current_micro_ned_dict, 'psnr_avg': psnr_avg, 'ssim_avg': ssim_avg, 'fps': fps}
         print(result)
 
     def demo(self):
