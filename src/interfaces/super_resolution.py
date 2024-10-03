@@ -208,13 +208,16 @@ class TextSR(base.TextBase):
         return texts
 
 
-    def _iterative_restore(self, text_sr_model, ocr_models, images_lr, iterations: int = 0):
+    def _iterative_restore(self, text_sr_model, ocr_models, images_lr, iterations: int = 0, update_image: bool = False):
         batch_size = images_lr.shape[0]
 
         restored = text_sr_model(images_lr, [''] * batch_size)
         for _ in range(iterations):
             texts = self._recognize(restored, ocr_models)
-            restored = text_sr_model(images_lr, texts)
+            if update_image:
+                restored = text_sr_model(restored, texts)
+            else:
+                restored = text_sr_model(images_lr, texts)
         return restored
 
     def test(self):
@@ -267,7 +270,7 @@ class TextSR(base.TextBase):
                     texts = label_strs
                     images_sr = model(images_lr, texts)
                 else:
-                    images_sr = self._iterative_restore(text_sr_model=model, ocr_models=(aster, aster_info, moran, crnn), images_lr=images_lr, iterations=self.args.num_restore_ocr_iterations)
+                    images_sr = self._iterative_restore(text_sr_model=model, ocr_models=(aster, aster_info, moran, crnn), images_lr=images_lr, iterations=self.args.num_restore_ocr_iterations, update_image=True)
 
 
             # images_sr = images_lr
