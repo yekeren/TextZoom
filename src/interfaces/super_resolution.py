@@ -177,13 +177,14 @@ class TextSR(base.TextBase):
         return metric_dict
 
     def _recognize(self, images, ocr_models):
+        batch_size = images.shape[0]
         aster, aster_info, moran, crnn = ocr_models
         if self.args.text_source == 'crnn':
             crnn_input = self.parse_crnn_data(images[:, :3, :, :])
             crnn_output = crnn(crnn_input)
             _, preds = crnn_output.max(2)
             preds = preds.transpose(1, 0).contiguous().view(-1)
-            preds_size = torch.IntTensor([crnn_output.size(0)] * val_batch_size)
+            preds_size = torch.IntTensor([crnn_output.size(0)] * batch_size)
             texts = self.converter_crnn.decode(preds.data, preds_size.data, raw=False)
         elif self.args.text_source == 'moran':
             moran_input = self.parse_moran_data(images[:, :3, :, :])
