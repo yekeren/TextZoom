@@ -212,14 +212,18 @@ class TextSR(base.TextBase):
     def _iterative_restore(self, text_sr_model, ocr_models, images_lr, iterations: int = 0, update_image: bool = False):
         batch_size = images_lr.shape[0]
 
-        restored = text_sr_model(images_lr, [''] * batch_size)
-        for _ in range(iterations):
-            texts = self._recognize(restored, ocr_models)
-            if update_image:
-                restored = text_sr_model(restored, texts)
-            else:
-                restored = text_sr_model(images_lr, texts)
-        return restored
+        if iterations > 0:
+            restored = text_sr_model(images_lr, [''] * batch_size)
+            for _ in range(iterations):
+                texts = self._recognize(restored, ocr_models)
+                if update_image:
+                    restored = text_sr_model(restored, texts)
+                else:
+                    restored = text_sr_model(images_lr, texts)
+            return restored
+
+        texts = self._recognize(images_lr, ocr_models)
+        return text_sr_model(images_lr, texts)
 
     def test(self):
         model_dict = self.generator_init()
@@ -266,12 +270,18 @@ class TextSR(base.TextBase):
                 batch_size = images_lr.shape[0]
                 if self.args.text_source == 'default':
                     texts = [''] * batch_size
-                    images_sr = model(images_lr, texts)
+                    if self.args.restore_hr:
+                        images_sr = model(images_hr, texts)
+                    else:
+                        images_sr = model(images_lr, texts)
                 elif self.args.text_source == 'reference':
                     texts = label_strs
-                    images_sr = model(images_lr, texts)
+                    if self.args.restore_hr:
+                        images_sr = model(images_hr, texts)
+                    else:
+                        images_sr = model(images_lr, texts)
                 else:
-                    images_sr = self._iterative_restore(text_sr_model=model, ocr_models=(aster, aster_info, moran, crnn), images_lr=images_lr, iterations=self.args.num_restore_ocr_iterations, update_image=True)
+                    images_sr = self._iterative_restore(text_sr_model=model, ocr_models=(aster, aster_info, moran, crnn), images_lr=images_lr, iterations=self.args.num_restore_ocr_iterations, update_image=False)
 
 
             # images_sr = images_lr
